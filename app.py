@@ -3,6 +3,7 @@ from flask_cors import CORS
 import google.generativeai as genai
 import requests
 import sys
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
