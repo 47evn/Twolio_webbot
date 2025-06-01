@@ -18,6 +18,7 @@ app = Flask(__name__)
 CORS(app)
 
 access_token = None
+user_session_state = {}
 
 def authenticate_bot():
     global access_token
@@ -87,10 +88,44 @@ def chat():
         "group_id": data.get("current_group_id")
     }
 
+    session_id = user_context["id"]
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
     }
+
+    if session_id not in user_session_state:
+        user_session_state[session_id] = {}
+
+    # Handle staged input from user
+    session_data = user_session_state[session_id]
+
+    if session_data.get("awaiting") == "date":
+        session_data["dateStart"] = user_prompt
+        session_data["awaiting"] = "time"
+        return jsonify({"response": "Please enter the Time start and make sure to follow the format HH:MM"})
+
+    elif session_data.get("awaiting") == "time":
+        session_data["timeStart"] = user_prompt
+        booking_payload = {
+            "ProfessionalID": session_data["ProfessionalID"],
+            "dateStart": session_data["dateStart"],
+            "timeStart": session_data["timeStart"],
+            "groupId": user_context["group_id"],
+            "userId": user_context["id"]
+        }
+        try:
+            booking_url = "https://bi.siissoft.com/secureappointment/api/v1/appointments"
+            booking_resp = requests.post(booking_url, headers=headers, json=booking_payload)
+            if booking_resp.status_code == 200:
+                result = booking_resp.json()
+                return jsonify({"response": f"✅ Appointment booked successfully!\n📅 {booking_payload}"})
+            else:
+                return jsonify({"response": f"❌ Booking failed. Status: {booking_resp.status_code}, Msg: {booking_resp.text}"})
+        except Exception as e:
+            return jsonify({"response": f"❌ Error booking appointment: {e}"})
+        finally:
+            user_session_state.pop(session_id, None)
 
     # Run 3 API calls concurrently
     with ThreadPoolExecutor(max_workers=3) as executor:
@@ -111,7 +146,6 @@ def chat():
     professionals_info = results["professionals"]
     slots_info = results["slots"]
 
-    # Compose prompt text for Gemini
     user_info_text = (
         f"\n[User Info]\n"
         f"ID: {user_context.get('id')}, "
@@ -133,18 +167,15 @@ def chat():
     ) if group_info else "[Group Info]\n⚠️ Not available.\n\n"
 
     professionals_text = f"[Professionals Info]\n{professionals_info}\n\n" if professionals_info else "[Professionals Info]\n⚠️ Not available.\n\n"
-
     slots_text = f"[Available Slots to Book Appointment]\n{slots_info}\n\n" if slots_info else "[Available Slots to Book Appointment]\n⚠️ Not available.\n\n"
 
     full_prompt = f"{default_instruction}\n{user_info_text}{group_info_text}{professionals_text}{slots_text}User: {user_prompt}\nAI:"
-
-    print(f"\n🧾 Full Prompt to Gemini:\n{full_prompt}")
 
     try:
         response = model.generate_content(full_prompt)
         ai_reply = response.text.strip()
 
-        # Check for INFO:<endpoint> in AI response
+        # Check for INFO:<endpoint> command
         match = re.search(r'INFO:\s*(\S+)', ai_reply)
         if match:
             endpoint = match.group(1)
@@ -152,10 +183,22 @@ def chat():
             info_response = requests.get(info_url, headers=headers, json={"format": "webbot"})
             return jsonify({'response': info_response.json().get("message", "✅ Success but no message.")})
 
+        # Check for booking pattern
+        booking_match = re.search(
+            r'Provide the Following Details\s*Professional ID\s*:\s*(\d+)\s*Date start\s*:\s*(\S+)\s*Time Start\s*:\s*(\S+)',
+            ai_reply, re.IGNORECASE
+        )
+
+        if booking_match:
+            session_data["ProfessionalID"] = int(booking_match.group(1))
+            session_data["awaiting"] = "date"
+            slot_msg = f"📅 Available Slots:\n{slots_info}\n\nPlease enter the Date start (format: yyyy/mm/dd)"
+            return jsonify({'response': slot_msg})
+
         return jsonify({'response': ai_reply})
     except Exception as e:
         return jsonify({'response': f"❌ Gemini Error: {str(e)}"})
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))  # fallback to 5000 for local dev
+    port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
