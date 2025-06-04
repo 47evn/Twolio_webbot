@@ -7,7 +7,7 @@ import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-sys.path.append(r"D:\testing\webbot")  # adjust path if needed
+sys.path.append(r"D:\testing\webbot")
 from helpers import default_instruction
 
 GOOGLE_API_KEY = "AIzaSyD52ImyueMUNql1-uCbbgEK4Ie9K14JRUI"
@@ -23,10 +23,7 @@ user_session_state = {}
 def authenticate_bot():
     global access_token
     url = "https://bi.siissoft.com/secureappointment/api/v1/auth/login"
-    payload = {
-        "username": "bot@siissoft.it",
-        "password": "Dana"
-    }
+    payload = {"username": "bot@siissoft.it", "password": "Dana"}
     try:
         response = requests.post(url, json=payload, timeout=5)
         response.raise_for_status()
@@ -97,37 +94,50 @@ def chat():
     if session_id not in user_session_state:
         user_session_state[session_id] = {}
 
-    # Handle staged input from user
     session_data = user_session_state[session_id]
 
+    # Step 1: Ask for date
     if session_data.get("awaiting") == "date":
         session_data["dateStart"] = user_prompt
         session_data["awaiting"] = "time"
-        return jsonify({"response": "Please enter the Time start and make sure to follow the format HH:MM"})
+        return jsonify({
+            "response": "📅 Got it! Now please enter the Time (format: HH:MM):"
+        })
 
+    # Step 2: Ask for time and trigger appointment booking
     elif session_data.get("awaiting") == "time":
         session_data["timeStart"] = user_prompt
+
         booking_payload = {
-            "ProfessionalID": session_data["ProfessionalID"],
-            "dateStart": session_data["dateStart"],
-            "timeStart": session_data["timeStart"],
             "groupId": user_context["group_id"],
-            "userId": user_context["id"]
+            "userId": user_context["id"],
+            "ProfessionalID": session_data.get("ProfessionalID", 0),
+            "dateStart": session_data["dateStart"],
+            "timeStart": session_data["timeStart"]
         }
+
+        print(booking_payload)
+
         try:
             booking_url = "https://bi.siissoft.com/secureappointment/api/v1/appointments"
             booking_resp = requests.post(booking_url, headers=headers, json=booking_payload)
-            if booking_resp.status_code == 200:
-                result = booking_resp.json()
-                return jsonify({"response": f"✅ Appointment booked successfully!\n📅 {booking_payload}"})
-            else:
-                return jsonify({"response": f"❌ Booking failed. Status: {booking_resp.status_code}, Msg: {booking_resp.text}"})
-        except Exception as e:
-            return jsonify({"response": f"❌ Error booking appointment: {e}"})
-        finally:
-            user_session_state.pop(session_id, None)
 
-    # Run 3 API calls concurrently
+            if booking_resp.status_code == 200:
+                user_session_state.pop(session_id, None)
+                return jsonify({
+                    "response": f"✅ Appointment booked successfully!\n📅 {booking_payload}"
+                })
+            else:
+                return jsonify({
+                    "response": f"❌ Booking failed.\nStatus: {booking_resp.status_code}\nMessage: {booking_resp.text}"
+                })
+
+        except Exception as e:
+            return jsonify({
+                "response": f"❌ Error booking appointment: {e}"
+            })
+
+    # Fetch info concurrently
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {
             executor.submit(fetch_group_info, headers, user_context["group_id"]): "group",
@@ -175,7 +185,16 @@ def chat():
         response = model.generate_content(full_prompt)
         ai_reply = response.text.strip()
 
-        # Check for INFO:<endpoint> command
+        if "BOOK AN APPOINTMENT PLEASE" in ai_reply.upper():
+            session_data["awaiting"] = "date"
+            session_data["ProfessionalID"] = 0  # Set dynamically if needed
+            # return jsonify({
+            #     "response": f"📅 Available Slots:\n{slots_info}\n\nPlease enter the Date (format: yyyy-mm-dd):"
+            # })
+            return jsonify({
+            "response": f"📅 Orari disponibili:\n{slots_info}\n\nPer favore, inserisci la data (formato: aaaa-mm-gg):"
+            })
+
         match = re.search(r'INFO:\s*(\S+)', ai_reply)
         if match:
             endpoint = match.group(1)
@@ -183,17 +202,16 @@ def chat():
             info_response = requests.get(info_url, headers=headers, json={"format": "webbot"})
             return jsonify({'response': info_response.json().get("message", "✅ Success but no message.")})
 
-        # Check for booking pattern
         booking_match = re.search(
             r'Provide the Following Details\s*Professional ID\s*:\s*(\d+)\s*Date start\s*:\s*(\S+)\s*Time Start\s*:\s*(\S+)',
             ai_reply, re.IGNORECASE
         )
-
         if booking_match:
             session_data["ProfessionalID"] = int(booking_match.group(1))
             session_data["awaiting"] = "date"
-            slot_msg = f"📅 Available Slots:\n{slots_info}\n\nPlease enter the Date start (format: yyyy/mm/dd)"
-            return jsonify({'response': slot_msg})
+            # return jsonify({'response': f"📅 Available Slots:\n{slots_info}\n\nPlease enter the Date start (yyyy-mm-dd):"})
+            return jsonify({'response': f"📅 Orari disponibili:\n{slots_info}\n\nPer favore, inserisci la data di inizio (aaaa-mm-gg):"})
+
 
         return jsonify({'response': ai_reply})
     except Exception as e:
