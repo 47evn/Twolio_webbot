@@ -5,6 +5,8 @@ import requests
 import sys
 import os
 import re
+import time
+from threading import Timer
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.append(r"D:\testing\webbot")
@@ -33,7 +35,27 @@ def authenticate_bot():
     except Exception as e:
         print(f"❌ Auth failed: {e}")
 
+def cleanup_old_sessions():
+    """Clean up session states older than 1 hour"""
+    current_time = time.time()
+    sessions_to_remove = []
+    
+    for session_id, session_data in user_session_state.items():
+        if 'last_activity' not in session_data:
+            session_data['last_activity'] = current_time
+        elif current_time - session_data['last_activity'] > 3600:  # 1 hour
+            sessions_to_remove.append(session_id)
+    
+    for session_id in sessions_to_remove:
+        user_session_state.pop(session_id, None)
+        print(f"🧹 Cleaned up old session: {session_id}")
+    
+    # Schedule next cleanup
+    Timer(1800, cleanup_old_sessions).start()  # Run every 30 minutes
+
+# Initialize authentication and cleanup
 authenticate_bot()
+cleanup_old_sessions()
 
 def fetch_group_info(headers, group_id):
     try:
@@ -84,7 +106,6 @@ def chat():
         "email": data.get("email"),
         "group_id": data.get("current_group_id"),
         "previous_response": data.get("previous_response", [])
-        
     }
 
     session_id = user_context["id"]
@@ -97,17 +118,39 @@ def chat():
         user_session_state[session_id] = {}
 
     session_data = user_session_state[session_id]
+    
+    # Update last activity timestamp
+    session_data['last_activity'] = time.time()
 
-    # Step 1: Ask for date
+    # Allow users to cancel booking process
+    if user_prompt.lower() in ['cancel', 'annulla', 'stop', 'reset', 'ricomincia', 'esci']:
+        user_session_state[session_id] = {'last_activity': time.time()}  # Clear session but keep timestamp
+        return jsonify({
+            "response": "❌ Prenotazione annullata. Come posso aiutarti?"
+        })
+
+    # Step 1: Handle date input
     if session_data.get("awaiting") == "date":
+        # Validate date format (basic validation)
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', user_prompt):
+            return jsonify({
+                "response": "❌ Formato data non valido. Usa il formato: aaaa-mm-gg (es: 2024-12-25)\n\n💡 Scrivi 'annulla' per uscire dalla prenotazione."
+            })
+        
         session_data["dateStart"] = user_prompt
         session_data["awaiting"] = "time"
         return jsonify({
-            "response": "📅 Got it! Now please enter the Time (format: HH:MM):"
+            "response": "📅 Perfetto! Ora inserisci l'orario (formato: HH:MM, es: 14:30):\n\n💡 Scrivi 'annulla' per uscire dalla prenotazione."
         })
 
-    # Step 2: Ask for time and trigger appointment booking
+    # Step 2: Handle time input and book appointment
     elif session_data.get("awaiting") == "time":
+        # Validate time format
+        if not re.match(r'^\d{2}:\d{2}$', user_prompt):
+            return jsonify({
+                "response": "❌ Formato orario non valido. Usa il formato: HH:MM (es: 14:30)\n\n💡 Scrivi 'annulla' per uscire dalla prenotazione."
+            })
+
         session_data["timeStart"] = user_prompt
 
         booking_payload = {
@@ -118,25 +161,54 @@ def chat():
             "timeStart": session_data["timeStart"]
         }
 
-        print(booking_payload)
+        print("🔄 Attempting booking:", booking_payload)
 
         try:
             booking_url = "https://bi.siissoft.com/secureappointment/api/v1/appointments"
-            booking_resp = requests.post(booking_url, headers=headers, json=booking_payload)
+            booking_resp = requests.post(booking_url, headers=headers, json=booking_payload, timeout=15)
+
+            # CRITICAL: Clear session state regardless of success/failure
+            user_session_state[session_id] = {'last_activity': time.time()}
 
             if booking_resp.status_code == 200:
-                user_session_state.pop(session_id, None)
                 return jsonify({
-                    "response": f"✅ Appointment booked successfully!\n📅 {booking_payload}"
+                    "response": f"✅ Appuntamento prenotato con successo!\n\n📅 Data: {booking_payload['dateStart']}\n🕐 Orario: {booking_payload['timeStart']}\n\n🎉 Ci vediamo presto! Come posso aiutarti adesso?"
                 })
             else:
+                error_msg = "Errore sconosciuto"
+                try:
+                    error_data = booking_resp.json()
+                    error_msg = error_data.get('message', error_data.get('error', booking_resp.text))
+                except:
+                    error_msg = booking_resp.text
+
                 return jsonify({
-                    "response": f"❌ Booking failed.\nStatus: {booking_resp.status_code}\nMessage: {booking_resp.text}"
+                    "response": f"❌ Prenotazione fallita: {error_msg}\n\n💡 Prova con un altro orario o contatta il supporto.\n\nCome posso aiutarti ora?"
                 })
 
-        except Exception as e:
+        except requests.exceptions.Timeout:
+            user_session_state[session_id] = {'last_activity': time.time()}  # Clear session
             return jsonify({
-                "response": f"❌ Error booking appointment: {e}"
+                "response": "❌ Timeout durante la prenotazione. Il server sta impiegando troppo tempo a rispondere.\n\n💡 Riprova più tardi o contatta il supporto. Come posso aiutarti?"
+            })
+        except requests.exceptions.ConnectionError:
+            user_session_state[session_id] = {'last_activity': time.time()}  # Clear session
+            return jsonify({
+                "response": "❌ Errore di connessione durante la prenotazione."
+            })
+        except Exception as e:
+            user_session_state[session_id] = {'last_activity': time.time()}  # Clear session
+            return jsonify({
+                "response": f"❌ Errore imprevisto durante la prenotazione: {str(e)}\n\n💡 Riprova o contatta il supporto. Come posso aiutarti?"
+            })
+
+    # Handle normal chat flow (not in booking process)
+    # Re-authenticate if needed
+    if not access_token:
+        authenticate_bot()
+        if not access_token:
+            return jsonify({
+                "response": "❌ Errore di autenticazione. Riprova più tardi."
             })
 
     # Fetch info concurrently
@@ -187,23 +259,29 @@ def chat():
         response = model.generate_content(full_prompt)
         ai_reply = response.text.strip()
 
+        # Handle booking initiation
         if "BOOK AN APPOINTMENT PLEASE" in ai_reply.upper():
             session_data["awaiting"] = "date"
             session_data["ProfessionalID"] = 0  # Set dynamically if needed
-            # return jsonify({
-            #     "response": f"📅 Available Slots:\n{slots_info}\n\nPlease enter the Date (format: yyyy-mm-dd):"
-            # })
             return jsonify({
-            "response": f"📅 Orari disponibili:\n{slots_info}\n\nPer favore, inserisci la data (formato: aaaa-mm-gg):"
+                "response": f"📅 Ecco gli orari disponibili:\n\n{slots_info}\n\n🗓️ Per prenotare, inserisci la data (formato: aaaa-mm-gg, es: 2024-12-25):\n\n💡 Scrivi 'annulla' in qualsiasi momento per uscire dalla prenotazione."
             })
 
+        # Handle info requests
         match = re.search(r'INFO:\s*(\S+)', ai_reply)
         if match:
             endpoint = match.group(1)
             info_url = f"https://bi.siissoft.com/secureappointment/api/v1/info/{endpoint}"
-            info_response = requests.get(info_url, headers=headers, json={"format": "webbot"})
-            return jsonify({'response': info_response.json().get("message", "✅ Success but no message.")})
+            try:
+                info_response = requests.get(info_url, headers=headers, json={"format": "webbot"}, timeout=10)
+                if info_response.status_code == 200:
+                    return jsonify({'response': info_response.json().get("message", "✅ Informazioni recuperate con successo.")})
+                else:
+                    return jsonify({'response': "❌ Non riesco a recuperare le informazioni richieste al momento."})
+            except Exception as e:
+                return jsonify({'response': f"❌ Errore nel recuperare le informazioni: Riprova più tardi."})
 
+        # Handle specific booking details
         booking_match = re.search(
             r'Provide the Following Details\s*Professional ID\s*:\s*(\d+)\s*Date start\s*:\s*(\S+)\s*Time Start\s*:\s*(\S+)',
             ai_reply, re.IGNORECASE
@@ -211,14 +289,38 @@ def chat():
         if booking_match:
             session_data["ProfessionalID"] = int(booking_match.group(1))
             session_data["awaiting"] = "date"
-            # return jsonify({'response': f"📅 Available Slots:\n{slots_info}\n\nPlease enter the Date start (yyyy-mm-dd):"})
-            return jsonify({'response': f"📅 Orari disponibili:\n{slots_info}\n\nPer favore, inserisci la data di inizio (aaaa-mm-gg):"})
-
+            return jsonify({
+                'response': f"📅 Ecco gli orari disponibili:\n\n{slots_info}\n\n🗓️ Per prenotare con il professionista selezionato, inserisci la data (formato: aaaa-mm-gg, es: 2024-12-25):\n\n💡 Scrivi 'annulla' in qualsiasi momento per uscire dalla prenotazione."
+            })
 
         return jsonify({'response': ai_reply})
+    
     except Exception as e:
-        return jsonify({'response': f"❌ Gemini Error: {str(e)}"})
+        print(f"❌ Gemini API Error: {str(e)}")
+        return jsonify({'response': "❌ Si è verificato un errore temporaneo. Riprova tra qualche istante."})
+
+# Health check endpoint
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({
+        "status": "healthy",
+        "timestamp": time.time(),
+        "active_sessions": len(user_session_state),
+        "authenticated": access_token is not None
+    })
+
+# Admin endpoint to clear all sessions (for debugging)
+@app.route('/admin/clear-sessions', methods=['POST'])
+def clear_all_sessions():
+    global user_session_state
+    session_count = len(user_session_state)
+    user_session_state = {}
+    return jsonify({
+        "message": f"Cleared {session_count} sessions",
+        "timestamp": time.time()
+    })
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    print(f"🚀 Starting Flask app on port {port}")
+    app.run(host='0.0.0.0', port=port, debug=False)
