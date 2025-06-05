@@ -106,6 +106,33 @@ def extract_slot_info(api_response):
     return slot_info_date, slot_info_time
 
 
+def get_user_appointment(url, headers, user_context): 
+    try:
+        user_id = user_context.get("id")
+        group_id = user_context.get("group_id")
+
+        if not user_id or not group_id:
+            raise ValueError("Missing user_id or group_id in user_context")
+
+        # Format URL with user_id
+        full_url = f"{url}/{user_id}"
+
+        # Pass groupId as query param
+        params = {
+            "groupId": group_id
+        }
+
+        resp = requests.get(full_url, headers=headers, params=params, timeout=5)
+
+        if resp.status_code == 200:
+            return resp.json()
+        else:
+            print(f"⚠️ API Error: Status {resp.status_code} - {resp.text}")
+    except Exception as e:
+        print(f"⚠️ Appointment API Error: {e}")
+    return {}
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -152,13 +179,13 @@ def chat():
         # Validate date format (basic validation)
         if not re.match(r'^\d{4}-\d{2}-\d{2}$', user_prompt):
             return jsonify({
-                "response": "❌ Formato data non valido. Usa il formato: aaaa-mm-gg (es: 2024-12-25)\n\n💡 Scrivi 'annulla' per uscire dalla prenotazione."
+                "response": "❌ Formato data non valido. Usa il formato: aaaa-mm-gg (es: 2024-12-25)"
             })
         
         session_data["dateStart"] = user_prompt
         session_data["awaiting"] = "time"
         return jsonify({
-            "response": "📅 Perfetto! Ora inserisci l'orario (formato: HH:MM, es: 14:30):\n\n💡 Scrivi 'annulla' per uscire dalla prenotazione."
+            "response": "📅 Perfetto! Ora inserisci l'orario (formato: HH:MM, es: 14:30):"
         })
 
     # Step 2: Handle time input and book appointment
@@ -166,7 +193,7 @@ def chat():
         # Validate time format
         if not re.match(r'^\d{2}:\d{2}$', user_prompt):
             return jsonify({
-                "response": "❌ Formato orario non valido. Usa il formato: HH:MM (es: 14:30)\n\n💡 Scrivi 'annulla' per uscire dalla prenotazione."
+                "response": "❌ Formato orario non valido. Usa il formato: HH:MM (es: 14:30)"
             })
 
         session_data["timeStart"] = user_prompt
@@ -219,7 +246,6 @@ def chat():
             return jsonify({
                 "response": f"❌ Errore imprevisto durante la prenotazione: {str(e)}\n\n💡 Riprova o contatta il supporto. Come posso aiutarti?"
             })
-
     # Handle normal chat flow (not in booking process)
     # Re-authenticate if needed
     if not access_token:
@@ -247,7 +273,12 @@ def chat():
     group_info = results["group"]
     professionals_info = results["professionals"]
     slots_info = results["slots"]
-    
+    appointment_url = "https://bi.siissoft.com/secureappointment/api/v1/appointments"
+    user_appointment_info = get_user_appointment(appointment_url, headers, user_context)
+    # print(f"🔄 User appointment info: {user_appointment_info}")
+
+        
+        
     user_info_text = (
         f"\n[User Info]\n"
         f"ID: {user_context.get('id')}, "
@@ -271,7 +302,9 @@ def chat():
     professionals_text = f"[Professionals Info]\n{professionals_info}\n\n" if professionals_info else "[Professionals Info]\n⚠️ Not available.\n\n"
     slots_text = f"[Available Slots to Book Appointment]\n{slots_info}\n\n" if slots_info else "[Available Slots to Book Appointment]\n⚠️ Not available.\n\n"
 
-    full_prompt = f"{default_instruction}\n{user_info_text}{group_info_text}{professionals_text}{slots_text} previous_chat_history {user_context.get('previous_response', [])}\nUser: {user_prompt}\nAI:"
+    full_prompt = f"{default_instruction}\n{user_info_text}{group_info_text}{professionals_text}{slots_text} previous_chat_history {user_context.get('previous_response', [])}\nUser: {user_prompt}\nAI:\n User appointment info: {user_appointment_info}"
+    
+    # print(f"🔄 Full prompt for Gemini:\n{full_prompt}\n{'-'*50}")
 
     try:
         response = model.generate_content(full_prompt)
