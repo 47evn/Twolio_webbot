@@ -82,7 +82,9 @@ def chat():
         "surname": data.get("surname"),
         "phone_number": data.get("phone_number"),
         "email": data.get("email"),
-        "group_id": data.get("current_group_id")
+        "group_id": data.get("current_group_id"),
+        "previous_response": data.get("previous_response", [])
+        
     }
 
     session_id = user_context["id"]
@@ -179,7 +181,7 @@ def chat():
     professionals_text = f"[Professionals Info]\n{professionals_info}\n\n" if professionals_info else "[Professionals Info]\n⚠️ Not available.\n\n"
     slots_text = f"[Available Slots to Book Appointment]\n{slots_info}\n\n" if slots_info else "[Available Slots to Book Appointment]\n⚠️ Not available.\n\n"
 
-    full_prompt = f"{default_instruction}\n{user_info_text}{group_info_text}{professionals_text}{slots_text}User: {user_prompt}\nAI:"
+    full_prompt = f"{default_instruction}\n{user_info_text}{group_info_text}{professionals_text}{slots_text} previous_chat_history {user_context.get('previous_response', [])}\nUser: {user_prompt}\nAI:"
 
     try:
         response = model.generate_content(full_prompt)

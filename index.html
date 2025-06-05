@@ -137,7 +137,7 @@
     </div>
 
     <script>
-        const SERVER_URL = "https://2425-2400-adc5-435-6400-34cb-25ea-88ff-93fa.ngrok-free.app/chat";
+        const SERVER_URL = "https://3b19-2400-adc5-435-6400-e500-4963-c8b4-9e09.ngrok-free.app/chat";
 
         const userData = {
             id: 15,
@@ -145,8 +145,16 @@
             surname: "Developer",
             phone_number: "+923174415047",
             email: "siissoftdev@gmail.com",
-            current_group_id: 3
+            current_group_id: 3,
+            previous_response: {
+                timestamp: "2025-06-04T14:30:00Z",
+                user_message: "How can I book an appointment?",
+                bot_reply: "To book an appointment, please provide your preferred date and time, and I will check available slots for you.",
+                intent: "book_appointment",
+                status: "resolved"
+            }
         };
+
 
         async function sendPrompt() {
             const inputBox = document.getElementById("userInput");
