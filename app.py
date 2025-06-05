@@ -88,6 +88,24 @@ def fetch_slots(headers, group_id):
         print(f"⚠️ Slots API Error: {e}")
     return {}
 
+def extract_slot_info(api_response):
+    """
+    Extracts available slot dates and cleaned time lists from the API response.
+    Removes duplicate times and sorts them.
+    """
+    slots_raw = api_response.get("slots", {})  # safely get the nested 'slots' dict
+
+    slot_info_date = list(slots_raw.keys())
+
+    # Cleaned slot_info_time: remove duplicates and sort time list
+    slot_info_time = {
+        date: sorted(list(set(times)))
+        for date, times in slots_raw.items()
+    }
+
+    return slot_info_date, slot_info_time
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -229,7 +247,7 @@ def chat():
     group_info = results["group"]
     professionals_info = results["professionals"]
     slots_info = results["slots"]
-
+    
     user_info_text = (
         f"\n[User Info]\n"
         f"ID: {user_context.get('id')}, "
@@ -261,10 +279,12 @@ def chat():
 
         # Handle booking initiation
         if "BOOK AN APPOINTMENT PLEASE" in ai_reply.upper():
+            # slot_info_date = extract_slot_info(slots_info)
+            slot_info_date, slot_info_time = extract_slot_info(slots_info)
             session_data["awaiting"] = "date"
             session_data["ProfessionalID"] = 0  # Set dynamically if needed
             return jsonify({
-                "response": f"📅 Ecco gli orari disponibili:\n\n{slots_info}\n\n🗓️ Per prenotare, inserisci la data (formato: aaaa-mm-gg, es: 2024-12-25):\n\n💡 Scrivi 'annulla' in qualsiasi momento per uscire dalla prenotazione."
+                "response": f"📅 Ecco gli orari disponibili:\n\n{slot_info_date}\n\n🗓️ Per prenotare, inserisci la data (formato: aaaa-mm-gg, es: 2024-12-25):\n\n💡 Scrivi 'annulla' in qualsiasi momento per uscire dalla prenotazione."
             })
 
         # Handle info requests
@@ -287,10 +307,12 @@ def chat():
             ai_reply, re.IGNORECASE
         )
         if booking_match:
+            slot_info_date, slot_info_time = extract_slot_info(slots_info)
             session_data["ProfessionalID"] = int(booking_match.group(1))
             session_data["awaiting"] = "date"
+            print( )
             return jsonify({
-                'response': f"📅 Ecco gli orari disponibili:\n\n{slots_info}\n\n🗓️ Per prenotare con il professionista selezionato, inserisci la data (formato: aaaa-mm-gg, es: 2024-12-25):\n\n💡 Scrivi 'annulla' in qualsiasi momento per uscire dalla prenotazione."
+                'response': f"📅 Ecco gli orari disponibili:\n\n{slot_info_time}\n\n🗓️ Per prenotare con il professionista selezionato, inserisci la data (formato: aaaa-mm-gg, es: 2024-12-25):"
             })
 
         return jsonify({'response': ai_reply})
@@ -298,6 +320,8 @@ def chat():
     except Exception as e:
         print(f"❌ Gemini API Error: {str(e)}")
         return jsonify({'response': "❌ Si è verificato un errore temporaneo. Riprova tra qualche istante."})
+
+
 
 # Health check endpoint
 @app.route('/health', methods=['GET'])
