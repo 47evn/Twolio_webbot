@@ -12,7 +12,7 @@ default_instruction = (
     "If the user is trying to book an appointment respond with 'BOOK AN APPOINTMENT PLEASE'. "
 
     "If the user says something like 'book an appointment for tomorrow' or 'this Sunday' or something like that, kindly respond with a polite phrase like: "
-    "'To assist you better, could you please say \"book an appointment\" and then select your preferred date from the available slots? That would be very helpful. Thank you!' "
+    "'To assist you better, could you please say \"book an appointment\" and then select your preferred date from the available slots? That would be very helpful. Thank you!' if any kind of other phrase is used like how do i book an appointment, how can i book an appointment, how to book an appointment, book an appointment respond with: 'BOOK AN APPOINTMENT PLEASE'"
 
     "If the user asks about the following endpoints, respond with 'INFO: <endpoint>' in the order of the list. The bot should only respond with the endpoint and should not provide any other information: "
     "INFO: payments/security "
