@@ -88,22 +88,32 @@ def fetch_slots(headers, group_id):
         print(f"⚠️ Slots API Error: {e}")
     return {}
 
-def extract_slot_info(api_response):
+def extract_slot_info_readable(api_response):
     """
-    Extracts available slot dates and cleaned time lists from the API response.
-    Removes duplicate times and sorts them.
+    Extracts available slot dates and cleaned time lists from the API response,
+    then formats them as user-readable text (bullet lists), not JSON.
     """
     slots_raw = api_response.get("slots", {})  # safely get the nested 'slots' dict
 
-    slot_info_date = list(slots_raw.keys())
+    # Sort dates for consistent ordering
+    sorted_dates = sorted(slots_raw.keys())
 
-    # Cleaned slot_info_time: remove duplicates and sort time list
-    slot_info_time = {
-        date: sorted(list(set(times)))
-        for date, times in slots_raw.items()
-    }
+    # Build a readable bullet list of dates
+    readable_dates = "Available Dates:\n"
+    for date in sorted_dates:
+        readable_dates += f"- {date}\n"
 
-    return slot_info_date, slot_info_time
+    # Build a readable bullet list of times under each date
+    readable_times = ""
+    for date in sorted_dates:
+        # Remove duplicates and sort times
+        unique_sorted_times = sorted(set(slots_raw[date]))
+        readable_times += f"{date}:\n"
+        for t in unique_sorted_times:
+            readable_times += f"  - {t}\n"
+        readable_times += "\n"  # extra line for spacing between dates
+
+    return readable_dates.strip(), readable_times.strip()
 
 
 def get_user_appointment(url, headers, user_context): 
@@ -305,7 +315,9 @@ def chat():
     full_prompt = f"{default_instruction}\n{user_info_text}{group_info_text}{professionals_text}{slots_text} previous_chat_history {user_context.get('previous_response', [])}\nUser: {user_prompt}\nAI:\n User appointment info: {user_appointment_info}"
     
     # print(f"🔄 Full prompt for Gemini:\n{full_prompt}\n{'-'*50}")
-
+    # slot_info_date, slot_info_time = extract_slot_info_readable(slots_info)
+    # print(f"🔄 AI requested booking with available slots:\n{slot_info_date}\n{slot_info_time}")
+    
     try:
         response = model.generate_content(full_prompt)
         ai_reply = response.text.strip()
@@ -313,11 +325,12 @@ def chat():
         # Handle booking initiation
         if "BOOK AN APPOINTMENT PLEASE" in ai_reply.upper():
             # slot_info_date = extract_slot_info(slots_info)
-            slot_info_date, slot_info_time = extract_slot_info(slots_info)
             session_data["awaiting"] = "date"
             session_data["ProfessionalID"] = 0  # Set dynamically if needed
+            slot_info_date, slot_info_time = extract_slot_info_readable(slots_info)
+            print(f"🔄 AI requested booking with available slots:\n{slot_info_date}\n{slot_info_time}")
             return jsonify({
-                "response": f"📅 Ecco gli orari disponibili:\n\n{slot_info_date}\n\n🗓️ Per prenotare, inserisci la data (formato: aaaa-mm-gg, es: 2024-12-25):\n\n💡 Scrivi 'annulla' in qualsiasi momento per uscire dalla prenotazione."
+                "response": f"📅 Ecco gli orari disponibili:\n\n{slot_info_time}🗓️ Per prenotare, inserisci la data (formato: aaaa-mm-gg, es: 2024-12-25):\n\n💡 Scrivi 'annulla' in qualsiasi momento per uscire dalla prenotazione."
             })
 
         # Handle info requests
@@ -340,7 +353,7 @@ def chat():
             ai_reply, re.IGNORECASE
         )
         if booking_match:
-            slot_info_date, slot_info_time = extract_slot_info(slots_info)
+            slot_info_date, slot_info_time = extract_slot_info_readable(slots_info)
             session_data["ProfessionalID"] = int(booking_match.group(1))
             session_data["awaiting"] = "date"
             print( )
@@ -380,4 +393,4 @@ def clear_all_sessions():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     print(f"🚀 Starting Flask app on port {port}")
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=True)
