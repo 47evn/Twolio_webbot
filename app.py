@@ -116,6 +116,34 @@ def extract_slot_info_readable(api_response):
     return readable_dates.strip(), readable_times.strip()
 
 
+def extract_slot_info_readable_appintments(response: dict) -> str:
+    """
+    Extracts and formats appointment dates and times from the API response.
+
+    Args:
+        response (dict): The API response containing an 'appointments' dict.
+
+    Returns:
+        str: A multiline string where each line is:
+             DD-MM-YYYY    H:MM,H:MM,...
+    """
+    appts = response.get('appointments', {})
+    lines = []
+
+    for date in sorted(appts.keys()):
+        # e.g. date = '2025-04-26'
+        yyyy, mm, dd = date.split('-')
+        formatted_date = f"{int(dd)}-{int(mm)}-{yyyy}"
+
+        times = sorted(appts[date].keys())
+        # strip leading zero from hour, keep minutes
+        formatted_times = [f"{int(t.split(':')[0])}:{t.split(':')[1]}" for t in times]
+
+        lines.append(f"{formatted_date}    {','.join(formatted_times)}")
+
+    return "\n".join(lines)
+
+
 def get_user_appointment(url, headers, user_context): 
     try:
         user_id = user_context.get("id")
@@ -203,7 +231,7 @@ def chat():
         # Validate time format
         if not re.match(r'^\d{2}:\d{2}$', user_prompt):
             return jsonify({
-                "response": "❌ Formato orario non valido. Usa il formato: HH:MM (es: 14:30)"
+                "response": "ohh! sembra che ci siano problemi con la prenotazione dell'appuntamento, forse il posto è già prenotato, riprova, per favore"
             })
 
         session_data["timeStart"] = user_prompt
@@ -285,7 +313,10 @@ def chat():
     slots_info = results["slots"]
     appointment_url = "https://bi.siissoft.com/secureappointment/api/v1/appointments"
     user_appointment_info = get_user_appointment(appointment_url, headers, user_context)
-    # print(f"🔄 User appointment info: {user_appointment_info}")
+    print(f"🔄 User appointment info: {user_appointment_info}")
+    user_appointment_info = extract_slot_info_readable_appintments(user_appointment_info)
+    print(f"🔄 User appointment info:\n{user_appointment_info}")
+
 
         
         
