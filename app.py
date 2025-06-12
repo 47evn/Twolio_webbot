@@ -313,7 +313,7 @@ def chat():
     slots_info = results["slots"]
     appointment_url = "https://bi.siissoft.com/secureappointment/api/v1/appointments"
     user_appointment_info = get_user_appointment(appointment_url, headers, user_context)
-    print(f"🔄 User appointment info: {user_appointment_info}")
+    # print(f"🔄 User appointment info: {user_appointment_info}")
     user_appointment_info = extract_slot_info_readable_appintments(user_appointment_info)
     print(f"🔄 User appointment info:\n{user_appointment_info}")
 
