@@ -39,4 +39,5 @@ default_instruction = (
     "INFO: end_user/send_messages_academy "
     "INFO: end_user/is_service_free "
     "INFO: error/generic "
+    "if the user asks about anything else like what is the weather whatever or whatever, respond with  INFO: human/escalation"
 )
