@@ -370,7 +370,9 @@ def chat():
             endpoint = match.group(1)
             info_url = f"https://bi.siissoft.com/secureappointment/api/v1/info/{endpoint}"
             try:
-                info_response = requests.get(info_url, headers=headers, json={"format": "webbot"}, timeout=10)
+                # print(f"🔄 Fetching info from: {user_context.get(gr)}")
+                # print(f" infooooooooooooooooo{user_context.get('group_id')}");``
+                info_response = requests.get(info_url, headers=headers, json={"format": "webbot","groupID": str(user_context.get("group_id")) }, timeout=10)
                 if info_response.status_code == 200:
                     return jsonify({'response': info_response.json().get("message", "✅ Informazioni recuperate con successo.")})
                 else:
