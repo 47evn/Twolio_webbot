@@ -313,9 +313,9 @@ def chat():
     slots_info = results["slots"]
     appointment_url = "https://bi.siissoft.com/secureappointment/api/v1/appointments"
     user_appointment_info = get_user_appointment(appointment_url, headers, user_context)
-    # print(f"🔄 User appointment info: {user_appointment_info}")
-    user_appointment_info = extract_slot_info_readable_appintments(user_appointment_info)
-    print(f"🔄 User appointment info:\n{user_appointment_info}")
+   
+    # user_appointment_info = extract_slot_info_readable_appintments(user_appointment_info)
+    # print(f"🔄 User appointment info:\n{user_appointment_info}")
 
 
         
@@ -345,10 +345,7 @@ def chat():
 
     full_prompt = f"{default_instruction}\n{user_info_text}{group_info_text}{professionals_text}{slots_text} previous_chat_history {user_context.get('previous_response', [])}\nUser: {user_prompt}\nAI:\n User appointment info: {user_appointment_info}"
     
-    # print(f"🔄 Full prompt for Gemini:\n{full_prompt}\n{'-'*50}")
-    # slot_info_date, slot_info_time = extract_slot_info_readable(slots_info)
-    # print(f"🔄 AI requested booking with available slots:\n{slot_info_date}\n{slot_info_time}")
-    
+
     try:
         response = model.generate_content(full_prompt)
         ai_reply = response.text.strip()
@@ -363,7 +360,54 @@ def chat():
             return jsonify({
                 "response": f"📅 Ecco gli orari disponibili:\n\n{slot_info_time}🗓️ Per prenotare, inserisci la data (formato: aaaa-mm-gg, es: 2024-12-25):\n\n💡 Scrivi 'annulla' in qualsiasi momento per uscire dalla prenotazione."
             })
+            
+            #deleteing appountments
+            
+# 🔄 Handle delete appointment intent from AI
+      # 🗑️ Handle user-provided appointment ID (after deletion intent)
+        if session_data.get("awaiting") == "delete_appointment":
+            appointment_id = user_prompt.strip()
+            print(f"🗑️ User entered appointment ID to delete: {appointment_id}")
+            session_data.pop("awaiting", None)  # Clear the state after handling
+            delete_url = f"https://bi.siissoft.com/secureappointment/api/v1/appointments/{appointment_id}"
+            delete_payload = {
+                "userId": user_context.get("id"),
+                "groupId": user_context.get("group_id")
+            }
 
+            try:
+                delete_resp = requests.delete(delete_url, headers=headers, json=delete_payload, timeout=10)
+                if delete_resp.status_code == 200:
+                    return jsonify({
+                        "response": f"✅ Appuntamento con ID {appointment_id} eliminato con successo.\nCome posso aiutarti ora?"
+                    })
+                else:
+                    error_msg = "Errore sconosciuto"
+                    try:
+                        error_data = delete_resp.json()
+                        error_msg = error_data.get('message', error_data.get('error', delete_resp.text))
+                    except:
+                        error_msg = delete_resp.text
+
+                    return jsonify({
+                        "response": f"❌ Impossibile eliminare l'appuntamento: {error_msg}\nVuoi riprovare con un altro ID?"
+                    })
+
+            except requests.exceptions.RequestException as e:
+                return jsonify({
+                    "response": f"❌ Errore di rete durante l'eliminazione dell'appuntamento: {str(e)}"
+                })
+
+        # 🔁 Now handle when Gemini triggers the deletion prompt again
+        if re.search(r"Deleting an appointment process initiates", ai_reply, re.IGNORECASE):
+            session_data["awaiting"] = "delete_appointment"
+            return jsonify({
+                "response": ai_reply
+            })
+
+
+        # You can trigger actual deletion API call here if desired
+        
         # Handle info requests
         match = re.search(r'INFO:\s*(\S+)', ai_reply)
         if match:
